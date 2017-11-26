@@ -1,0 +1,55 @@
+{
+  "project_info": {
+    "project_number": "640259675345",
+    "firebase_url": "https://nearby-187205.firebaseio.com",
+    "project_id": "nearby-187205",
+    "storage_bucket": "nearby-187205.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:640259675345:android:9cff85a538f3c325",
+        "android_client_info": {
+          "package_name": "com.cybrilla.nearby"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "640259675345-eporeb6ef3i7hn0ek4r9ldinpsu89m10.apps.googleusercontent.com",
+          "client_type": 3
+        },
+        {
+          "client_id": "640259675345-7mdk0t4nt8u2nvsvg8p7cq7ut1se86id.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.cybrilla.nearby",
+            "certificate_hash": "2552ce0cfaf4b52fe0ea65e37bcb49a3b4b70046"
+          }
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAPIsfY9DJ6NTDdFXyQGtTzYkq4uj8ZXlI"
+        }
+      ],
+      "services": {
+        "analytics_service": {
+          "status": 1
+        },
+        "appinvite_service": {
+          "status": 2,
+          "other_platform_oauth_client": [
+            {
+              "client_id": "640259675345-eporeb6ef3i7hn0ek4r9ldinpsu89m10.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        },
+        "ads_service": {
+          "status": 2
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
