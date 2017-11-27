@@ -4,33 +4,47 @@ package com.cybrilla.nearby;
  * Created by sivaavatar on 11/26/2017.
  */
 
-import android.app.Fragment;
+import android.*;
+import android.Manifest;
+import android.app.Activity;
 import android.content.Intent;
+import android.content.IntentSender;
+
 import android.content.pm.PackageManager;
 import android.location.Location;
 import android.os.AsyncTask;
 import android.os.Bundle;
+import android.os.Handler;
 import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
 import android.util.Log;
 import android.view.View;
 import android.widget.Toast;
+import android.widget.Toolbar;
 
 import com.google.android.gms.auth.api.signin.GoogleSignIn;
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount;
 import com.google.android.gms.auth.api.signin.GoogleSignInClient;
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions;
+import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.api.ApiException;
+import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.common.api.PendingResult;
+import com.google.android.gms.common.api.ResultCallback;
+import com.google.android.gms.common.api.Status;
 import com.google.android.gms.location.FusedLocationProviderClient;
+import com.google.android.gms.location.LocationRequest;
 import com.google.android.gms.location.LocationServices;
-import com.google.android.gms.location.places.PlaceLikelihood;
-import com.google.android.gms.location.places.PlaceLikelihoodBufferResponse;
+import com.google.android.gms.location.LocationSettingsRequest;
+import com.google.android.gms.location.LocationSettingsResult;
+import com.google.android.gms.location.LocationSettingsStates;
+import com.google.android.gms.location.LocationSettingsStatusCodes;
 import com.google.android.gms.maps.CameraUpdateFactory;
 import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.OnMapReadyCallback;
 import com.google.android.gms.maps.SupportMapFragment;
-import com.google.android.gms.maps.model.CameraPosition;
 import com.google.android.gms.maps.model.LatLng;
 import com.google.android.gms.maps.model.MarkerOptions;
 import com.google.android.gms.tasks.OnCompleteListener;
@@ -40,9 +54,6 @@ import com.google.firebase.auth.AuthResult;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.auth.GoogleAuthProvider;
-import com.google.android.gms.location.places.GeoDataClient;
-import com.google.android.gms.location.places.Places;
-import com.google.android.gms.location.places.PlaceDetectionClient;
 
 import org.json.JSONObject;
 
@@ -59,12 +70,8 @@ import java.util.List;
  * Demonstrate Firebase Authentication using a Google ID Token.
  */
 public class GoogleSignInActivity extends CommonActivity implements
-        View.OnClickListener, OnMapReadyCallback {
-    private CameraPosition mCameraPosition;
-
-    // The entry points to the Places API.
-    private GeoDataClient mGeoDataClient;
-    private PlaceDetectionClient mPlaceDetectionClient;
+        View.OnClickListener, OnMapReadyCallback, GoogleApiClient.ConnectionCallbacks,
+        GoogleApiClient.OnConnectionFailedListener {
 
     // The entry point to the Fused Location Provider.
     private FusedLocationProviderClient mFusedLocationProviderClient;
@@ -80,17 +87,6 @@ public class GoogleSignInActivity extends CommonActivity implements
     // location retrieved by the Fused Location Provider.
     private Location mLastKnownLocation;
 
-    // Keys for storing activity state.
-    private static final String KEY_CAMERA_POSITION = "camera_position";
-    private static final String KEY_LOCATION = "location";
-
-    // Used for selecting the current place.
-    private static final int M_MAX_ENTRIES = 50;
-    private String[] mLikelyPlaceNames;
-    private String[] mLikelyPlaceAddresses;
-    private String[] mLikelyPlaceAttributions;
-    private LatLng[] mLikelyPlaceLatLngs;
-
     private static final int RC_SIGN_IN = 9001;
     private GoogleMap mMap;
 
@@ -98,14 +94,16 @@ public class GoogleSignInActivity extends CommonActivity implements
 
     private GoogleSignInClient mGoogleSignInClient;
 
+    private SupportMapFragment mapFragment;
+
+    private android.support.v7.widget.Toolbar toolbar;
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-
         setUpListeners();
-        initializePlacesApi();
         buildGoogleSignInOption();
     }
 
@@ -113,6 +111,35 @@ public class GoogleSignInActivity extends CommonActivity implements
     private void setUpListeners() {
         findViewById(R.id.sign_in_button).setOnClickListener(this);
     }
+
+    private void loadPermissions(String[] perm, int requestCode) {
+        if (ContextCompat.checkSelfPermission(this, perm[0]) != PackageManager.PERMISSION_GRANTED && ContextCompat.checkSelfPermission(this, perm[1]) != PackageManager.PERMISSION_GRANTED) {
+            if (!ActivityCompat.shouldShowRequestPermissionRationale(this, perm[0]) &&
+                    !ActivityCompat.shouldShowRequestPermissionRationale(this, perm[1])) {
+                ActivityCompat.requestPermissions(this, perm, requestCode);
+            }
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        switch (requestCode) {
+            case PERMISSIONS_REQUEST_ACCESS_FINE_LOCATION: {
+                // If request is cancelled, the result arrays are empty.
+                if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    mLocationPermissionGranted = true;
+                    showMapFragment();
+                } else {
+                    mLocationPermissionGranted = false;
+                    finish();
+                }
+                return;
+            }
+
+        }
+
+    }
+
 
     private void buildGoogleSignInOption() {
         GoogleSignInOptions googleSignInOptions = new GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
@@ -125,14 +152,7 @@ public class GoogleSignInActivity extends CommonActivity implements
     }
 
 
-    private void initializePlacesApi() {
-        //places api
-        // Construct a GeoDataClient.
-        mGeoDataClient = Places.getGeoDataClient(this, null);
-
-        // Construct a PlaceDetectionClient.
-        mPlaceDetectionClient = Places.getPlaceDetectionClient(this, null);
-
+    private void initializeLocationProvider() {
         // Construct a FusedLocationProviderClient.
         mFusedLocationProviderClient = LocationServices.getFusedLocationProviderClient(this);
     }
@@ -140,8 +160,10 @@ public class GoogleSignInActivity extends CommonActivity implements
     @Override
     public void onStart() {
         super.onStart();
-        FirebaseUser currentUser = mAuth.getCurrentUser();
-        updateUI(currentUser);
+        if (null != mAuth) {
+            FirebaseUser currentUser = mAuth.getCurrentUser();
+            updateUI(currentUser);
+        }
     }
 
     private void signIn() {
@@ -152,6 +174,7 @@ public class GoogleSignInActivity extends CommonActivity implements
     @Override
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+
         if (requestCode == RC_SIGN_IN) {
             Task<GoogleSignInAccount> task = GoogleSignIn.getSignedInAccountFromIntent(data);
             try {
@@ -160,7 +183,29 @@ public class GoogleSignInActivity extends CommonActivity implements
             } catch (ApiException e) {
                 updateUI(null);
             }
+        } else if (requestCode == 1000) {
+            if (resultCode == Activity.RESULT_OK) {
+                Log.i("TEST", "reached on activity result");
+                initializeLocationProvider();
+                mLocationPermissionGranted = true;
+                runMethodsOnThread();
+
+            } else if (resultCode == Activity.RESULT_CANCELED) {
+                //Write your code if there's no result
+                mLocationPermissionGranted = false;
+                finish();
+            }
         }
+    }
+
+    private void runMethodsOnThread() {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                Log.i("TEST", "reached on thread methods");
+                showMapFragment();
+            }
+        });
     }
 
     private void firebaseAuthWithGoogle(GoogleSignInAccount acct) {
@@ -202,7 +247,7 @@ public class GoogleSignInActivity extends CommonActivity implements
     private void updateUI(FirebaseUser user) {
         if (user != null) {
             findViewById(R.id.sign_in_button).setVisibility(View.GONE);
-            showMapFragment();
+            getLocationPermission();
         } else {
             hideProgressDialog();
             findViewById(R.id.map).setVisibility(View.GONE);
@@ -211,40 +256,94 @@ public class GoogleSignInActivity extends CommonActivity implements
     }
 
     private void showMapFragment() {
-        findViewById(R.id.map).setVisibility(View.VISIBLE);
-        SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager()
-                .findFragmentById(R.id.map);
-        mapFragment.getMapAsync(this);
-    }
+        Log.i("TEST", "reached on map");
 
-    private void getLocationPermission() {
-        if (ContextCompat.checkSelfPermission(this.getApplicationContext(),
-                android.Manifest.permission.ACCESS_FINE_LOCATION)
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION)
                 == PackageManager.PERMISSION_GRANTED) {
-            mLocationPermissionGranted = true;
+            findViewById(R.id.map).setVisibility(View.VISIBLE);
+            if (null == mapFragment) {
+                Log.i("TEST", "reached on map NULL call Async");
+                mapFragment = (SupportMapFragment) getSupportFragmentManager()
+                        .findFragmentById(R.id.map);
+                mapFragment.getMapAsync(this);
+            } else {
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        Log.i("TEST", "reached on map call location");
+                        getDeviceLocation();
+                    }
+                });
+            }
         } else {
-            ActivityCompat.requestPermissions(this,
-                    new String[]{android.Manifest.permission.ACCESS_FINE_LOCATION},
+            loadPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION},
                     PERMISSIONS_REQUEST_ACCESS_FINE_LOCATION);
         }
     }
 
-    @Override
-    public void onRequestPermissionsResult(int requestCode,
-                                           @NonNull String permissions[],
-                                           @NonNull int[] grantResults) {
-        mLocationPermissionGranted = false;
-        switch (requestCode) {
-            case PERMISSIONS_REQUEST_ACCESS_FINE_LOCATION: {
-                // If request is cancelled, the result arrays are empty.
-                if (grantResults.length > 0
-                        && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                    mLocationPermissionGranted = true;
+    private void getLocationPermission() {
+        GoogleApiClient googleApiClient = null;
+        if (googleApiClient == null) {
+            googleApiClient = new GoogleApiClient.Builder(this)
+                    .addApi(LocationServices.API).addConnectionCallbacks(this)
+                    .addOnConnectionFailedListener(GoogleSignInActivity.this).build();
+            googleApiClient.connect();
+            LocationRequest locationRequest = LocationRequest.create();
+            locationRequest.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
+            locationRequest.setInterval(30 * 1000);
+            locationRequest.setFastestInterval(5 * 1000);
+            LocationSettingsRequest.Builder builder = new LocationSettingsRequest.Builder()
+                    .addLocationRequest(locationRequest);
+
+            // **************************
+            builder.setAlwaysShow(true); // this is the key ingredient
+            // **************************
+
+            PendingResult<LocationSettingsResult> result = LocationServices.SettingsApi
+                    .checkLocationSettings(googleApiClient, builder.build());
+            result.setResultCallback(new ResultCallback<LocationSettingsResult>() {
+                @Override
+                public void onResult(LocationSettingsResult result) {
+                    final Status status = result.getStatus();
+                    final LocationSettingsStates state = result
+                            .getLocationSettingsStates();
+                    switch (status.getStatusCode()) {
+                        case LocationSettingsStatusCodes.SUCCESS:
+                            // All location settings are satisfied. The client can
+                            // initialize location
+                            // requests here.
+                            Log.i("TEST", "reached on result");
+                            initializeLocationProvider();
+                            mLocationPermissionGranted = true;
+                            runMethodsOnThread();
+                            break;
+                        case LocationSettingsStatusCodes.RESOLUTION_REQUIRED:
+                            // Location settings are not satisfied. But could be
+                            // fixed by showing the user
+                            // a dialog.
+                            try {
+                                // Show the dialog by calling
+                                // startResolutionForResult(),
+                                // and check the result in onActivityResult().
+                                status.startResolutionForResult(GoogleSignInActivity.this, 1000);
+                            } catch (IntentSender.SendIntentException e) {
+                                // Ignore the error.
+                            }
+                            break;
+                        case LocationSettingsStatusCodes.SETTINGS_CHANGE_UNAVAILABLE:
+                            // Location settings are not satisfied. However, we have
+                            // no way to fix the
+                            // settings so we won't show the dialog.
+                            mLocationPermissionGranted = false;
+                            finish();
+                            break;
+                    }
                 }
-            }
+            });
         }
-        updateLocationUI();
     }
+
 
     @Override
     public void onClick(View v) {
@@ -257,13 +356,14 @@ public class GoogleSignInActivity extends CommonActivity implements
     @Override
     public void onMapReady(GoogleMap googleMap) {
         hideProgressDialog();
+        Log.i("TEST", "reached on map Ready");
         mMap = googleMap;
-
-        getLocationPermission();
-
-        updateLocationUI();
-
-        getDeviceLocation();
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                getDeviceLocation();
+            }
+        });
 
     }
 
@@ -323,7 +423,6 @@ public class GoogleSignInActivity extends CommonActivity implements
 
         return data;
     }
-
 
     /**
      * A class, to download Google Places
@@ -427,24 +526,33 @@ public class GoogleSignInActivity extends CommonActivity implements
     }
 
     private void updateLocationUI() {
-        if (mMap == null) {
-            return;
-        }
-        try {
-            if (mLocationPermissionGranted) {
-                mMap.setMyLocationEnabled(true);
-                mMap.getUiSettings().setMyLocationButtonEnabled(true);
-            } else {
-                mMap.setMyLocationEnabled(false);
-                mMap.getUiSettings().setMyLocationButtonEnabled(false);
-                mLastKnownLocation = null;
-                getLocationPermission();
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                Log.i("TEST", "reached on update map UI");
+                if (mMap == null) {
+                    Log.i("TEST", "reached on update map UI NULL");
+                    return;
+                }
+                try {
+                    if (mLocationPermissionGranted) {
+                        mMap.setMyLocationEnabled(true);
+                        mMap.getUiSettings().setMyLocationButtonEnabled(true);
+                        showPlaces();
+                    } else {
+                        mMap.setMyLocationEnabled(false);
+                        mMap.getUiSettings().setMyLocationButtonEnabled(false);
+                        mLastKnownLocation = null;
+                    }
+                } catch (SecurityException e) {
+                }
             }
-        } catch (SecurityException e) {
-        }
+        });
+
     }
 
     private void getDeviceLocation() {
+        Log.i("TEST", "reached on device location" + mLocationPermissionGranted);
         try {
             if (mLocationPermissionGranted) {
                 Task<Location> locationResult = mFusedLocationProviderClient.getLastLocation();
@@ -454,10 +562,20 @@ public class GoogleSignInActivity extends CommonActivity implements
                         if (task.isSuccessful()) {
                             // Set the map's camera position to the current location of the device.
                             mLastKnownLocation = task.getResult();
-                            mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(
-                                    new LatLng(mLastKnownLocation.getLatitude(),
-                                            mLastKnownLocation.getLongitude()), DEFAULT_ZOOM));
-                            showPlaces();
+                            if (null != mLastKnownLocation) {
+                                Log.i("TEST", "reached on device location inside");
+                                mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(
+                                        new LatLng(mLastKnownLocation.getLatitude(),
+                                                mLastKnownLocation.getLongitude()), DEFAULT_ZOOM));
+                                updateLocationUI();
+                            } else {
+                                new Handler().postDelayed((new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        getDeviceLocation();
+                                    }
+                                }), 4000);
+                            }
                         } else {
                             mMap.moveCamera(CameraUpdateFactory
                                     .newLatLngZoom(mDefaultLocation, DEFAULT_ZOOM));
@@ -470,78 +588,19 @@ public class GoogleSignInActivity extends CommonActivity implements
         }
     }
 
-    private void showCurrentPlace() {
-        if (mMap == null) {
-            return;
-        }
-
-        if (mLocationPermissionGranted) {
-            // Get the likely places - that is, the businesses and other points of interest that
-            // are the best match for the device's current location.
-            @SuppressWarnings("MissingPermission") final Task<PlaceLikelihoodBufferResponse> placeResult =
-                    mPlaceDetectionClient.getCurrentPlace(null);
-            placeResult.addOnCompleteListener
-                    (new OnCompleteListener<PlaceLikelihoodBufferResponse>() {
-                        @Override
-                        public void onComplete(@NonNull Task<PlaceLikelihoodBufferResponse> task) {
-                            if (task.isSuccessful() && task.getResult() != null) {
-                                PlaceLikelihoodBufferResponse likelyPlaces = task.getResult();
-
-                                // Set the count, handling cases where less than 5 entries are returned.
-                                int count;
-                                if (likelyPlaces.getCount() < M_MAX_ENTRIES) {
-                                    count = likelyPlaces.getCount();
-                                } else {
-                                    count = M_MAX_ENTRIES;
-                                }
-
-                                int i = 0;
-                                mLikelyPlaceNames = new String[count];
-                                mLikelyPlaceAddresses = new String[count];
-                                mLikelyPlaceAttributions = new String[count];
-                                mLikelyPlaceLatLngs = new LatLng[count];
-
-                                for (PlaceLikelihood placeLikelihood : likelyPlaces) {
-                                    // Build a list of likely places to show the user.
-                                    mLikelyPlaceNames[i] = (String) placeLikelihood.getPlace().getName();
-                                    mLikelyPlaceAddresses[i] = (String) placeLikelihood.getPlace()
-                                            .getAddress();
-                                    mLikelyPlaceAttributions[i] = (String) placeLikelihood.getPlace()
-                                            .getAttributions();
-                                    mLikelyPlaceLatLngs[i] = placeLikelihood.getPlace().getLatLng();
-
-                                    i++;
-                                    if (i > (count - 1)) {
-                                        break;
-                                    }
-                                }
-
-                                // Release the place likelihood buffer, to avoid memory leaks.
-                                likelyPlaces.release();
-
-                                // Show a dialog offering the user the list of likely places, and add a
-                                // marker at the selected place.
-                                addMarkers();
-
-                            } else {
-                            }
-                        }
-                    });
-        } else {
-
-            // Prompt the user for permission.
-            getLocationPermission();
-        }
+    @Override
+    public void onConnected(@Nullable Bundle bundle) {
+        Log.i("TEST", "reached on connected");
     }
 
-    private void addMarkers() {
-        for (int i = 0; i < mLikelyPlaceNames.length; i++) {
-            mMap.addMarker(new MarkerOptions()
-                    .title(mLikelyPlaceNames[i])
-                    .position(mLikelyPlaceLatLngs[i])
-                    .snippet(mLikelyPlaceAddresses[i]));
-        }
+    @Override
+    public void onConnectionSuspended(int i) {
+
     }
 
+    @Override
+    public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
+
+    }
 
 }
